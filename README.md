@@ -2,18 +2,18 @@
 
 ```java
 
-package com.example.demo.plugin;
+package com.banksteel.openerp.test;
 
+import com.example.demo.plugin.CustomResultSetHandler;
 import java.sql.PreparedStatement;
 import java.util.List;
+import java.util.Properties;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.executor.parameter.ParameterHandler;
 import org.apache.ibatis.executor.resultset.DefaultResultSetHandler;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.mapping.ParameterMap;
 import org.apache.ibatis.mapping.ParameterMapping;
-import org.apache.ibatis.mapping.ResultMap;
 import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
@@ -24,7 +24,6 @@ import org.apache.ibatis.reflection.DefaultReflectorFactory;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.factory.DefaultObjectFactory;
 import org.apache.ibatis.reflection.wrapper.DefaultObjectWrapperFactory;
-import org.apache.ibatis.scripting.defaults.DefaultParameterHandler;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
@@ -39,20 +38,22 @@ public class CustomInterceptor implements Interceptor {
     @Override
     public Object intercept(Invocation invocation) throws Throwable {
         try {
-            DefaultParameterHandler parameterHandler = (DefaultParameterHandler) invocation.getTarget();
-            MappedStatement ms = (MappedStatement)parameterHandler.getClass().getDeclaredField("mappedStatement").get(parameterHandler);
+            ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
+            MetaObject metaObject = MetaObject.forObject(parameterHandler, new DefaultObjectFactory(),
+                new DefaultObjectWrapperFactory(), new DefaultReflectorFactory());
+            MappedStatement ms = (MappedStatement)metaObject.getValue("mappedStatement");
             SqlCommandType sqlCommandType = ms.getSqlCommandType();
             if(SqlCommandType.INSERT == sqlCommandType
-            || SqlCommandType.UPDATE == sqlCommandType) {
-                BoundSql boundSql = (BoundSql)parameterHandler.getClass().getDeclaredField("boundSql").get(parameterHandler);
-                Configuration configuration = (Configuration)parameterHandler.getClass().getDeclaredField("configuration").get(parameterHandler);
+                || SqlCommandType.UPDATE == sqlCommandType) {
+                BoundSql boundSql = (BoundSql)metaObject.getValue("boundSql");
+                Configuration configuration = (Configuration)metaObject.getValue("configuration");
                 List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
                 Object parameterObject = boundSql.getParameterObject();
-                MetaObject metaObject = configuration.newMetaObject(parameterObject);
+                MetaObject metaParameterObject = configuration.newMetaObject(parameterObject);
                 parameterMappings.forEach(e -> {
-                    Object val = metaObject.getValue(e.getProperty());
-                    //TODO：判断是否是需要加密的字段，如果是加密
-                    metaObject.setValue(e.getProperty(), val);
+                    Object val = metaParameterObject.getValue(e.getProperty());
+                    //TODO：判断是否是需要加密的字段，如果是加密，这里的逻辑你先想好怎么操作
+                    metaParameterObject.setValue(e.getProperty(), val);
                 });
             }
         } catch (Exception e) {
@@ -83,8 +84,12 @@ public class CustomInterceptor implements Interceptor {
         }
         return Plugin.wrap(target, this);
     }
-}
 
+    @Override
+    public void setProperties(Properties properties) {
+        // 把你的配置加载进来
+    }
+}
 
 ```
 
