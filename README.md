@@ -1,3 +1,142 @@
+- FieldEncryptInterceptor
+
+```java
+package com.example.demo.sulaoban;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.math.BigDecimal;
+import java.sql.PreparedStatement;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.apache.ibatis.executor.parameter.ParameterHandler;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.plugin.Signature;
+
+@Intercepts({@Signature(type = ParameterHandler.class, method = "setParameters", args = {
+    PreparedStatement.class})})
+public class FieldEncryptInterceptor implements Interceptor {
+
+    private static final List<Class<?>> CLASS_LIST = Arrays
+        .asList(Object.class, String.class, BigDecimal.class, double.class, Double.class
+            , int.class, Integer.class, long.class, Long.class, float.class, Float.class, short.class, Short.class
+            , byte.class, Byte.class, boolean.class, Boolean.class);
+
+    @Override
+    public Object intercept(Invocation invocation) throws Throwable {
+        if (SystemConditionControl.matchMarket(MarketConstant.EU)) {
+            ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
+            Object parameter = parameterHandler.getParameterObject();
+            this.process(parameter);
+        }
+        return invocation.proceed();
+    }
+
+    public void process(Object parameter) throws IllegalAccessException {
+        if (Objects.isNull(parameter)) {
+            return;
+        }
+        Class<?> clazz = parameter.getClass();
+        if (CLASS_LIST.contains(clazz) || clazz.getName().startsWith("java.lang")) {
+            return;
+        }
+        List<Field> fieldList = new ArrayList<>();
+        this.getFields(fieldList, clazz);
+        this.doProcess(parameter, fieldList);
+
+    }
+
+    public List<Field> getFieldList(Object bean) {
+        List<Field> fieldList = new ArrayList<>();
+        getFields(fieldList, bean.getClass());
+        return fieldList;
+    }
+
+    private void doProcess(Object bean, List<Field> fieldList) {
+
+        fieldList.stream().forEach(field -> {
+
+            field.setAccessible(true);
+            try {
+                field.set(bean, this.getJiamiVal(bean, field));
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("方法不允许访问！");
+            }
+        });
+    }
+
+    private Object getJiamiVal(Object parameter, Field field) throws IllegalAccessException {
+        Class<?> clazz = field.getType();
+        Object fieldBean = field.get(parameter);
+        if (fieldBean == null) {
+            return null;
+        } else if (Iterable.class.isAssignableFrom(clazz)) {
+            Collection c = (Collection) fieldBean;
+            c.stream().forEach(item -> {
+                try {
+                    this.process(item);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } else if (Map.class.isAssignableFrom(clazz)) {
+            Map map = (Map)fieldBean;
+            // 过滤掉重复的值
+            map.values().stream().distinct().forEach(item -> {
+                try {
+                    this.process(item);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            // TODO：您要加密的类型
+        } else if (String.class.isAssignableFrom(clazz)
+            || Number.class.isAssignableFrom(clazz)) {
+            Crypto cryptoAnnotation = field.getAnnotation(Crypto.class);
+            if (cryptoAnnotation != null) {
+                if (cryptoAnnotation.encrypt()) {
+                    field.setAccessible(true);
+                    String value = (String) field.get(parameter);
+                    String encryptedValue = AesSecureHelper.encryptBase64(value);
+                    field.set(parameter, encryptedValue);
+                }
+            }
+        } else if (!CLASS_LIST.contains(clazz) && !clazz.getName().startsWith("java.lang")) {
+
+            this.process(fieldBean);
+        }
+
+        return fieldBean;
+    }
+
+    private void getFields(List<Field> fieldList, Class<?> tClass) {
+
+        if (tClass == null || tClass == Object.class || tClass.getName().startsWith("java.lang")) {
+            return;
+        }
+        Field[] fields = tClass.getDeclaredFields();
+        if (fields != null && fields.length > 0) {
+            for (Field field : fields) {
+                if (!Modifier.isStatic(field.getModifiers()) && !Modifier.isFinal(field.getModifiers())) {
+                    fieldList.add(field);
+                }
+
+            }
+        }
+        this.getFields(fieldList, tClass.getSuperclass());
+    }
+}
+```
+
+
 - CustomInterceptor
 
 ```java
