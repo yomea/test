@@ -9,12 +9,9 @@ import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 import org.apache.ibatis.executor.parameter.ParameterHandler;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
@@ -35,12 +32,28 @@ public class FieldEncryptInterceptor implements Interceptor {
         if (SystemConditionControl.matchMarket(MarketConstant.EU)) {
             ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
             Object parameter = parameterHandler.getParameterObject();
-            this.process(parameter);
+            this.execEncrypt(parameter);
         }
         return invocation.proceed();
     }
 
-    public void process(Object parameter) throws IllegalAccessException {
+    private void execEncrypt(Object parameter) throws IllegalAccessException {
+        if (Objects.isNull(parameter)) {
+            return;
+        }
+        if(parameter instanceof Map) {
+            Map map = (Map)parameter;
+            map.values().stream().distinct()
+                .forEach(item -> {
+                    this.process(item);
+                });
+        } else {
+            this.process(parameter);
+        }
+    }
+
+    //只处理bean
+    private void process(Object parameter) {
         if (Objects.isNull(parameter)) {
             return;
         }
@@ -48,15 +61,15 @@ public class FieldEncryptInterceptor implements Interceptor {
         if (CLASS_LIST.contains(clazz) || clazz.getName().startsWith("java.lang")) {
             return;
         }
-        List<Field> fieldList = new ArrayList<>();
-        this.getFields(fieldList, clazz);
+        // 只处理java bean，这种字段上才可能存在注解
+        List<Field> fieldList = this.getFieldList(clazz);
         this.doProcess(parameter, fieldList);
 
     }
 
-    public List<Field> getFieldList(Object bean) {
+    public List<Field> getFieldList(Class<?> clazz) {
         List<Field> fieldList = new ArrayList<>();
-        getFields(fieldList, bean.getClass());
+        this.getFields(fieldList, clazz);
         return fieldList;
     }
 
@@ -66,55 +79,72 @@ public class FieldEncryptInterceptor implements Interceptor {
 
             field.setAccessible(true);
             try {
-                field.set(bean, this.getJiamiVal(bean, field));
+                field.set(bean, this.getEncryptVal(bean, field));
             } catch (IllegalAccessException e) {
                 throw new RuntimeException("方法不允许访问！");
             }
         });
     }
 
-    private Object getJiamiVal(Object parameter, Field field) throws IllegalAccessException {
-        Class<?> clazz = field.getType();
+    private Object getEncryptVal(Object parameter, Field field) throws IllegalAccessException {
         Object fieldBean = field.get(parameter);
         if (fieldBean == null) {
+            // 没有值，不需要操作
             return null;
+        }
+        return this.doGetEncryptVal(fieldBean, null, field);
+    }
+
+    private Object doGetEncryptVal(Object fieldBean, Field parentField, Field currentField) {
+        if(Objects.isNull(fieldBean)) {
+            return null;
+        }
+        // 字段类型
+        Class<?> clazz = fieldBean.getClass();
+        // 注意：对于集合类型的，如果该字段上标注了需要加密，而且元素是String的话，也要加密，如果元素里面嵌套了
+        // 集合，将不再加密
+        if (clazz.isArray()) {
+            Object[] c = (Object[]) fieldBean;
+            for(Object item : c) {
+                this.doGetEncryptVal(item, currentField, null);
+            }
         } else if (Iterable.class.isAssignableFrom(clazz)) {
-            Collection c = (Collection) fieldBean;
-            c.stream().forEach(item -> {
-                try {
-                    this.process(item);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            Iterable c = (Iterable) fieldBean;
+            for(Object item : c) {
+                this.doGetEncryptVal(item, currentField, null);
+            }
         } else if (Map.class.isAssignableFrom(clazz)) {
             Map map = (Map)fieldBean;
-            // 过滤掉重复的值
-            map.values().stream().distinct().forEach(item -> {
-                try {
-                    this.process(item);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
+            map.values().stream().forEach(item -> {
+                this.doGetEncryptVal(item, currentField, null);
             });
-            // TODO：您要加密的类型
-        } else if (String.class.isAssignableFrom(clazz)
-            || Number.class.isAssignableFrom(clazz)) {
-            Crypto cryptoAnnotation = field.getAnnotation(Crypto.class);
-            if (cryptoAnnotation != null) {
-                if (cryptoAnnotation.encrypt()) {
-                    field.setAccessible(true);
-                    String value = (String) field.get(parameter);
-                    String encryptedValue = AesSecureHelper.encryptBase64(value);
-                    field.set(parameter, encryptedValue);
-                }
-            }
-        } else if (!CLASS_LIST.contains(clazz) && !clazz.getName().startsWith("java.lang")) {
-
+        } else if (String.class.isAssignableFrom(clazz)) {
+            boolean encrypt = this.isEncrypt(parentField, currentField);
+            return this.encryptNess( (String) fieldBean, encrypt);
+        } else {
             this.process(fieldBean);
         }
-
         return fieldBean;
+    }
+
+    private Object encryptNess(String fieldBean, boolean encrypt) {
+        if(!encrypt) {
+            return fieldBean;
+        }
+        String encryptedValue = AesSecureHelper.encryptBase64(fieldBean);
+        return encryptedValue;
+    }
+
+    private boolean isEncrypt(Field parentField, Field currentField) {
+        if(Objects.isNull(parentField) && Objects.isNull(currentField)) {
+            return false;
+        }
+        Field field = Objects.nonNull(currentField) ? currentField : parentField;
+        Crypto cryptoAnnotation = field.getAnnotation(Crypto.class);
+        if (cryptoAnnotation != null) {
+            return cryptoAnnotation.encrypt();
+        }
+        return false;
     }
 
     private void getFields(List<Field> fieldList, Class<?> tClass) {
