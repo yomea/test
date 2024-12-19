@@ -45,11 +45,11 @@ public class FieldEncryptInterceptor implements Interceptor {
             Map map = (Map)parameter;
             map.values().stream().distinct()
                 .forEach(item -> {
-                    this.doGetEncryptVal(item, null, null);
+                    this.doGetEncryptVal(item, null);
 //                    this.process(item);
                 });
         } else {
-            this.doGetEncryptVal(parameter, null, null);
+            this.doGetEncryptVal(parameter, null);
 //                    this.process(item);
         }
     }
@@ -94,34 +94,33 @@ public class FieldEncryptInterceptor implements Interceptor {
             // 没有值，不需要操作
             return null;
         }
-        return this.doGetEncryptVal(fieldBean, null, field);
+        return this.doGetEncryptVal(fieldBean, field);
     }
 
-    private Object doGetEncryptVal(Object fieldBean, Field parentField, Field currentField) {
+    private Object doGetEncryptVal(Object fieldBean, Field field) {
         if(Objects.isNull(fieldBean)) {
             return null;
         }
         // 字段类型
         Class<?> clazz = fieldBean.getClass();
-        // 注意：对于集合类型的，如果该字段上标注了需要加密，而且元素是String的话，也要加密，如果元素里面嵌套了
-        // 集合，将不再加密
+        // 只对标有注解的String类型java bean字段做加密
         if (clazz.isArray()) {
             Object[] c = (Object[]) fieldBean;
             for(Object item : c) {
-                this.doGetEncryptVal(item, currentField, null);
+                this.doGetEncryptVal(item, null);
             }
         } else if (Iterable.class.isAssignableFrom(clazz)) {
             Iterable c = (Iterable) fieldBean;
             for(Object item : c) {
-                this.doGetEncryptVal(item, currentField, null);
+                this.doGetEncryptVal(item, null);
             }
         } else if (Map.class.isAssignableFrom(clazz)) {
             Map map = (Map)fieldBean;
             map.values().stream().forEach(item -> {
-                this.doGetEncryptVal(item, currentField, null);
+                this.doGetEncryptVal(item, null);
             });
         } else if (String.class.isAssignableFrom(clazz)) {
-            boolean encrypt = this.isEncrypt(parentField, currentField);
+            boolean encrypt = this.isEncrypt(field);
             return this.encryptNess( (String) fieldBean, encrypt);
         } else {
             this.process(fieldBean);
@@ -137,11 +136,10 @@ public class FieldEncryptInterceptor implements Interceptor {
         return encryptedValue;
     }
 
-    private boolean isEncrypt(Field parentField, Field currentField) {
-        if(Objects.isNull(parentField) && Objects.isNull(currentField)) {
+    private boolean isEncrypt(Field field) {
+        if(Objects.isNull(field)) {
             return false;
         }
-        Field field = Objects.nonNull(currentField) ? currentField : parentField;
         Crypto cryptoAnnotation = field.getAnnotation(Crypto.class);
         if (cryptoAnnotation != null) {
             return cryptoAnnotation.encrypt();
