@@ -45,10 +45,12 @@ public class FieldEncryptInterceptor implements Interceptor {
             Map map = (Map)parameter;
             map.values().stream().distinct()
                 .forEach(item -> {
-                    this.process(item);
+                    this.doGetEncryptVal(item, null, null);
+//                    this.process(item);
                 });
         } else {
-            this.process(parameter);
+            this.doGetEncryptVal(parameter, null, null);
+//                    this.process(item);
         }
     }
 
