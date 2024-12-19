@@ -13,10 +13,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.ibatis.executor.parameter.ParameterHandler;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.reflection.DefaultReflectorFactory;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.ReflectorFactory;
+import org.apache.ibatis.reflection.factory.DefaultObjectFactory;
+import org.apache.ibatis.reflection.factory.ObjectFactory;
+import org.apache.ibatis.reflection.wrapper.DefaultObjectWrapperFactory;
 
 @Intercepts({@Signature(type = ParameterHandler.class, method = "setParameters", args = {
     PreparedStatement.class})})
@@ -27,12 +35,23 @@ public class FieldEncryptInterceptor implements Interceptor {
             , int.class, Integer.class, long.class, Long.class, float.class, Float.class, short.class, Short.class
             , byte.class, Byte.class, boolean.class, Boolean.class);
 
+    private static final ObjectFactory OBJECT_FACTORY = new DefaultObjectFactory();
+    private static final org.apache.ibatis.reflection.wrapper.ObjectWrapperFactory OBJECT_WRAPPER_FACTORY = new DefaultObjectWrapperFactory();
+    private static final ReflectorFactory REFLECTOR_FACTORY = new DefaultReflectorFactory();
+
     @Override
     public Object intercept(Invocation invocation) throws Throwable {
         if (SystemConditionControl.matchMarket(MarketConstant.EU)) {
             ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
-            Object parameter = parameterHandler.getParameterObject();
-            this.execEncrypt(parameter);
+            MetaObject metaObject = MetaObject.forObject(parameterHandler, OBJECT_FACTORY, OBJECT_WRAPPER_FACTORY, REFLECTOR_FACTORY);
+            MappedStatement mappedStatement = (MappedStatement) metaObject.getValue("mappedStatement");
+            SqlCommandType sqlCommandType = mappedStatement.getSqlCommandType();
+            // 只处理dml语句
+            if(SqlCommandType.INSERT == sqlCommandType ||
+                SqlCommandType.UPDATE == sqlCommandType) {
+                Object parameter = parameterHandler.getParameterObject();
+                this.execEncrypt(parameter);
+            }
         }
         return invocation.proceed();
     }
