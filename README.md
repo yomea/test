@@ -62,11 +62,16 @@ public class FieldEncryptInterceptor implements Interceptor {
         }
         if(parameter instanceof Map) {
             Map map = (Map)parameter;
-            map.values().stream().distinct()
-                .forEach(item -> {
-                    this.doGetEncryptVal(item, null);
-//                    this.process(item);
-                });
+            List<Object> itemRepeatList = new ArrayList<>();
+            map.values().forEach(item -> {
+                for(Object repeat : itemRepeatList) {
+                    if(repeat == item) {
+                        return;
+                    }
+                }
+                this.doGetEncryptVal(item, null);
+                itemRepeatList.add(item);
+            });
         } else {
             this.doGetEncryptVal(parameter, null);
 //                    this.process(item);
